@@ -14,8 +14,8 @@ function getICS(): Vcalendar {
         const builder = new VcalendarBuilder();
         const vcalendar: Vcalendar = builder
             .setVersion('2.0')
-            .setProdId('-//SmallZombie//ZZZ Event ICS//ZH')
-            .setName('绝区零活动')
+            .setProdId('-//SmallZombie//ZZZ Birthday ICS//ZH')
+            .setName('绝区零角色生日')
             .setRefreshInterval('P1D')
             .setCalScale('GREGORIAN')
             .setTzid('Asia/Shanghai')
