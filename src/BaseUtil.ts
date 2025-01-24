@@ -1,5 +1,5 @@
 /**
- * Last Update: 2025-01-22 12:00:00
+ * Last Update: 2025-01-24 06:00:00
  */
 
 class Vcalendar {
@@ -49,7 +49,12 @@ class Vcalendar {
         for (const i of this.items) {
             lines.push('BEGIN:VEVENT');
             lines.push('UID:' + i.uid);
-            lines.push('DTSTAMP:' + i.dtstamp);
+
+            if (i.hasChanged) {
+                lines.push('DTSTAMP:' + this.dateToDateTime(new Date()));
+            } else {
+                lines.push('DTSTAMP:' + i.dtstamp);
+            }
 
             const dtstart = i.dtstart.at(-1) === 'Z' ? i.dtstart.slice(0, -1) : i.dtstart;
             lines.push(`DTSTART;${dtstart.length === 8 ? 'VALUE=DATE' : 'TZID=' + this.tzid}:${dtstart}`);
@@ -88,7 +93,8 @@ class Vcalendar {
         const items: Vevent[] = [];
 
         let inEvent = false;
-        for (const i of data.split('\n')) {
+        const lines = data.split(/\r?\n/);
+        for (const i of lines) {
             if (inEvent) {
                 const item = items.at(-1)!;
                 if (i.startsWith('UID:')) {
@@ -107,6 +113,22 @@ class Vcalendar {
                     item.description = i.slice('DESCRIPTION:'.length);
                 } else if (i === 'END:VEVENT') {
                     inEvent = false;
+
+                    // 补齐必填值
+                    if (!item.uid) {
+                        item.uid = crypto.randomUUID();
+                        console.warn(`Not found uid in line ${lines.indexOf(i) + 1}, default to "${item.uid}".`);
+                    }
+                    if (!item.dtstamp) {
+                        item.dtstamp = dateToDateTime(new Date(), builder.tzid);
+                        console.warn(`Not found dtstamp in line ${lines.indexOf(i) + 1}, default to "${item.dtstamp}".`);
+                    }
+
+                    if (!item.dtstart) {
+                        throw new Error(`Not found dtstart in line ${lines.indexOf(i) + 1}`);
+                    }
+
+                    item.hasChanged = false;
                 }
             } else {
                 if (i.startsWith('VERSION:')) {
@@ -125,11 +147,7 @@ class Vcalendar {
                     builder.setTzoffset(i.slice('TZOFFSETTO:'.length));
                 } else if (i === 'BEGIN:VEVENT') {
                     inEvent = true;
-                    items.push({
-                        uid: crypto.randomUUID(),
-                        dtstamp: dateToDateTime(new Date(), builder.tzid),
-                        dtstart: ''
-                    });
+                    items.push(new Vevent('', '', ''));
                 }
             }
         }
@@ -196,14 +214,79 @@ class VcalendarBuilder {
     }
 }
 
-type Vevent = {
+class Vevent {
     uid: string;
     dtstamp: string;
-    dtstart: string;
-    dtend?: string;
-    rrule?: string;
-    summary?: string;
-    description?: string;
+    #dtstart: string;
+    #dtend?: string;
+    #rrule?: string;
+    #summary?: string;
+    #description?: string;
+    hasChanged: boolean = false;
+
+    constructor(uid: string, dtstamp: string, dtstart: string) {
+        this.uid = uid;
+        this.dtstamp = dtstamp;
+        this.#dtstart = dtstart;
+    }
+
+
+    get dtstart(): string {
+        return this.#dtstart;
+    }
+
+    set dtstart(dtstart: string) {
+        if (dtstart.endsWith('Z')) dtstart = dtstart.slice(0, -1);
+        if (this.#dtstart !== dtstart) {
+            this.#dtstart = dtstart;
+            this.hasChanged = true;
+        }
+    }
+
+    get dtend(): string | undefined {
+        return this.#dtend;
+    }
+
+    set dtend(dtend: string | undefined) {
+        if (dtend && dtend.endsWith('Z')) dtend = dtend.slice(0, -1);
+        if (this.#dtend !== dtend) {
+            this.#dtend = dtend;
+            this.hasChanged = true;
+        }
+    }
+
+    get rrule(): string | undefined {
+        return this.#rrule;
+    }
+
+    set rrule(rrule: string | undefined) {
+        if (this.#rrule !== rrule) {
+            this.#rrule = rrule;
+            this.hasChanged = true;
+        }
+    }
+
+    get summary(): string | undefined {
+        return this.#summary;
+    }
+
+    set summary(summary: string | undefined) {
+        if (this.#summary !== summary) {
+            this.#summary = summary;
+            this.hasChanged = true;
+        }
+    }
+
+    get description(): string | undefined {
+        return this.#description;
+    }
+
+    set description(description: string | undefined) {
+        if (this.#description !== description) {
+            this.#description = description;
+            this.hasChanged = true;
+        }
+    }
 }
 
 const timeout = (time: number) => new Promise(resolve => setTimeout(resolve, time));
@@ -257,12 +340,10 @@ function getMonthByTimezone(date: Date, tzid: string = 'Etc/UTC'): number {
 }
 
 
-export type {
-    Vevent
-}
 export {
     Vcalendar,
     VcalendarBuilder,
+    Vevent,
     timeout,
     getFullYearByTimezone,
     getDateByTimezone,

@@ -1,9 +1,10 @@
 import { join } from '@std/path';
-import { getDateByTimezone, getMonthByTimezone, timeout, Vcalendar, VcalendarBuilder } from './src/BaseUtil.ts';
+import { getDateByTimezone, getMonthByTimezone, timeout, Vcalendar, VcalendarBuilder, Vevent } from './src/BaseUtil.ts';
 import { getAllCharacters, getCharacterDetail } from './src/WikiController.ts';
 import { ReleaseJsonType } from './src/type/ReleaseJsonType.ts';
 import { UID_PREFIX } from './src/Const.ts';
-import { existsSync } from "@std/fs/exists";
+import { existsSync } from '@std/fs/exists';
+import { getFullYearByTimezone } from './src/BaseUtil.ts';
 
 
 const icsPath = join(Deno.cwd(), 'release.ics');
@@ -36,11 +37,26 @@ function getJson(): ReleaseJsonType {
 
 async function main() {
     const ics = getICS();
-    const json = getJson();
+    let json = getJson();
     const characters = await getAllCharacters();
 
-    let needSaveICS = false;
     let needSaveJSON = false;
+    ics.items = ics.items.filter(v => {
+        if (!characters.some(vv => UID_PREFIX + vv.id === v.uid)) {
+            console.log(`[!] Remove "${v.summary}"(${v.uid}) in ICS`);
+            return false;
+        }
+        return true;
+    });
+    json = json.filter(v => {
+        if (!characters.some(vv => vv.id === v.id)) {
+            console.log(`[!] Remove "${v.name}"(${v.id}) in JSON`);
+            needSaveJSON = true;
+            return false;
+        }
+        return true;
+    });
+
     console.log('[!] Total Characters: ', characters.length);
     for (let i = 0; i < characters.length; i++) {
         const item = characters[i];
@@ -48,33 +64,19 @@ async function main() {
 
         const birthdayMonth = getMonthByTimezone(birthday, ics.tzid);
         const birthdayDate = getDateByTimezone(birthday, ics.tzid);
-        const releaseStr = `${release.getFullYear()}${String(release.getMonth() + 1).padStart(2, '0')}${String(release.getDate()).padStart(2, '0')}`;
+        const releaseStr = `${getFullYearByTimezone(release, ics.tzid)}${String(getMonthByTimezone(release, ics.tzid)).padStart(2, '0')}${String(getDateByTimezone(release, ics.tzid)).padStart(2, '0')}`;
         const rrule = `FREQ=YEARLY;BYMONTH=${String(birthdayMonth).padStart(2, '0')};BYMONTHDAY=${String(birthdayDate).padStart(2, '0')}`;
 
-        let needSaveICSInThisCycle = false;
         let icsItem = ics.items.find(v => v.uid === UID_PREFIX + item.id);
-        if (icsItem) {
-            if (icsItem.dtstart !== releaseStr) {
-                icsItem.dtstart = releaseStr;
-                icsItem.rrule = rrule;
-                needSaveICSInThisCycle = true;
-            }
-        } else {
-            icsItem = {
-                uid: UID_PREFIX + item.id,
-                dtstamp: ics.dateToDateTime(new Date()),
-                dtstart: releaseStr,
-                rrule,
-                summary: item.name
-            }
+        if (!icsItem) {
+            icsItem = new Vevent(UID_PREFIX + item.id, '', releaseStr);
             ics.items.push(icsItem);
-            needSaveICSInThisCycle = true;
         }
-        if (needSaveICSInThisCycle) {
+        icsItem.dtstart = releaseStr;
+        icsItem.rrule = rrule;
+        icsItem.summary = item.name;
+        if (icsItem.hasChanged) {
             console.log(`${i + 1}/${characters.length} Update "${item.name}"(${item.id}) in ICS`);
-
-            icsItem.dtstamp = ics.dateToDateTime(new Date());
-            needSaveICS = true;
         }
 
         let needSaveJSONInThisCycle = false;
@@ -112,6 +114,7 @@ async function main() {
         await timeout(200);
     }
 
+    const needSaveICS = ics.items.some(v => v.hasChanged);
     if (needSaveICS) {
         const icsSavePath = join(Deno.cwd(), 'release.ics');
         Deno.writeTextFileSync(icsSavePath, ics.toString());
